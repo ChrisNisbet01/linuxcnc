@@ -8,15 +8,15 @@
 
 /********************************************************************
 * Description:  hal.h
-*               This file, 'hal.h', defines the API and data 
+*               This file, 'hal.h', defines the API and data
 *               structures used by the HAL
 *
 * Author: John Kasunich
 * License: LGPL Version 2
-*    
+*
 * Copyright (c) 2003 All rights reserved.
 *
-* Last change: 
+* Last change:
 ********************************************************************/
 /* testing */
 
@@ -264,7 +264,7 @@ typedef enum {
     HAL_PORT = 5
 } hal_type_t;
 
-/** HAL pins have a direction attribute.  A pin may be an input to 
+/** HAL pins have a direction attribute.  A pin may be an input to
     the HAL component, an output, or it may be bidirectional.
     Any number of HAL_IN or HAL_IO pins may be connected to the same
     signal, but only one HAL_OUT pin is permitted.  This is equivalent
@@ -302,7 +302,7 @@ typedef double real_t __attribute__((aligned(8)));
 typedef rtapi_u64 ireal_t __attribute__((aligned(8))); // integral type as wide as real_t / hal_float_t
 
 #define hal_float_t volatile real_t
-       
+
 /** HAL "data union" structure
  ** This structure may hold any type of hal data
 */
@@ -324,7 +324,7 @@ typedef struct {
 /***********************************************************************
 *                      "LOCKING" FUNCTIONS                             *
 ************************************************************************/
-/** The 'hal_set_lock()' function sets locking based on one of the 
+/** The 'hal_set_lock()' function sets locking based on one of the
     locking types defined in hal.h
     HAL_LOCK_NONE -locks none
     HAL_LOCK_* - intermediate locking levels
@@ -332,7 +332,7 @@ typedef struct {
 */
 extern int hal_set_lock(unsigned char lock_type);
 
-/** The 'hal_get_lock()' function returns the current locking level 
+/** The 'hal_get_lock()' function returns the current locking level
     locking types defined in hal.h
     HAL_LOCK_NONE -locks none
     HAL_LOCK_* - intermediate locking levels
@@ -537,7 +537,7 @@ extern int hal_param_s32_new(const char *name, hal_param_dir_t dir,
     hal_s32_t * data_addr, int comp_id);
 
 /** printf_style-style versions of hal_param_XXX_new */
-extern int hal_param_bit_newf(hal_param_dir_t dir, 
+extern int hal_param_bit_newf(hal_param_dir_t dir,
     hal_bit_t * data_addr, int comp_id, const char *fmt, ...)
 	__attribute__((format(printf,4,5)));
 extern int hal_param_float_newf(hal_param_dir_t dir,
@@ -793,10 +793,10 @@ extern int hal_set_constructor(int comp_id, constructor make);
 
 /******************************************************************************
   A HAL port pin is an asynchronous one way byte stream
-  
+
   A hal port should have only one reader and one writer. Both sides can
   read or write respectivly at any time without interfering with the other
- 
+
   A component that exports a PORT pin does not own the port buffer.
   The signal linking an input port to an output port owns the port buffer.
   The buffer is allocated by issuing a 'halcmd sets port-sig size'
@@ -805,7 +805,7 @@ extern int hal_set_constructor(int comp_id, constructor make);
 
 
 /** hal_port_read reads count bytes from the port into dest.
-    This function should only be called by the component that owns 
+    This function should only be called by the component that owns
     the IN PORT pin.
     returns
         true: count bytes were read into dest
@@ -817,7 +817,7 @@ extern bool hal_port_read(hal_port_t port, char* dest, unsigned count);
 /** hal_port_peek operates the same as hal_port_read but no bytes are consumed
     from the input port. Repeated calls to hal_port_peek will return the same data.
     This function should only be called by the component that owns the IN PORT pin.
-    returns 
+    returns
         true: count bytes were read into dest
         false: no bytes were read into dest
 */
@@ -825,22 +825,22 @@ extern bool hal_port_peek(hal_port_t port, char* dest, unsigned count);
 
 /** hal_port_peek_commit advances the read position in the port buffer
     by count bytes. A hal_port_peek followed by a hal_port_peek_commit
-    with the same count value would function equivalently to 
+    with the same count value would function equivalently to
     hal_port_read given the same count value. This function should only
     be called by the component that owns the IN PORT pin.
     returns:
        true: count readable bytes were skipped and are no longer accessible
        false: no bytes wer skipped
-*/ 
+*/
 extern bool hal_port_peek_commit(hal_port_t port, unsigned count);
 
-/** hal_port_write writes count bytes from src into the port. 
+/** hal_port_write writes count bytes from src into the port.
     This function should only be called by the component that owns
     the OUT PORT pin.
     returns:
         true: count bytes were written
         false: no bytes were written into dest
-    
+
 */
 extern bool hal_port_write(hal_port_t port, const char* src, unsigned count);
 
@@ -867,7 +867,7 @@ extern void hal_port_clear(hal_port_t port);
 
 
 #ifdef ULAPI
-/** hal_port_wait_readable spin waits on a port until it has at least 
+/** hal_port_wait_readable spin waits on a port until it has at least
     count bytes available for reading, or *stop > 0
  */
 extern void hal_port_wait_readable(hal_port_t** port, unsigned count, sig_atomic_t* stop);
