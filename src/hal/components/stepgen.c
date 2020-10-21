@@ -337,7 +337,16 @@ typedef enum
 } stepgen_mode_t;
 
 struct stepgen_t;
+
 typedef void (*output_generator_fn)(struct stepgen_t *stepgen);
+typedef void (*update_state_fn)(struct stepgen_t *stepgen);
+typedef void (*check_dir_hold_delay_fn)(struct stepgen_t *stepgen);
+
+typedef struct {
+    output_generator_fn generate_output;
+    update_state_fn update_state;
+    check_dir_hold_delay_fn check_dir_hold_delay;
+} stepgen_methods_t;
 
 typedef struct stepgen_t {
     /* stuff that is both read and written by makepulses */
@@ -360,7 +369,7 @@ typedef struct stepgen_t {
     hal_u32_t dir_setup;	/* param: direction setup time */
 
     int step_type;		/* stepping type - see list above */
-    output_generator_fn generate_output;
+    stepgen_methods_t const *methods;
 
     int cycle_max;		/* cycle length for step types 2 and up */
     int num_phases;		/* number of phases for types 2 and up */
@@ -430,7 +439,7 @@ enum
 {
     step_type_step_dir,
     step_type_up_down,
-    first_pattern_step_type
+    step_type_first_pattern
 };
 
 /* other globals */
@@ -475,7 +484,7 @@ export_all_variables(stepgen_t * const stepgens, size_t const num_stepgen)
 
 	if (retval != 0) {
 	    rtapi_print_msg(RTAPI_MSG_ERR,
-		"STEPGEN: ERROR: stepgen %d var export failed\n", n);
+		"STEPGEN: ERROR: stepgen %zd var export failed\n", n);
 	    return -1;
 	}
     }
@@ -671,17 +680,36 @@ update_timers(stepgen_t * const stepgen)
 }
 
 static void
-update_state(stepgen_t * const stepgen)
+update_state_null(stepgen_t * const stepgen)
 {
-    if (stepgen->step_type >= first_pattern_step_type) {
-	/* update state */
-	stepgen->state += stepgen->curr_dir;
-	if (stepgen->state < 0) {
-	    stepgen->state = stepgen->cycle_max;
-	} else if (stepgen->state > stepgen->cycle_max) {
-	    stepgen->state = 0;
-	}
+    /* Nothing to do. */
+}
+
+static void
+update_state_pattern(stepgen_t * const stepgen)
+{
+    /* update state */
+    stepgen->state += stepgen->curr_dir;
+    if (stepgen->state < 0) {
+	stepgen->state = stepgen->cycle_max;
+    } else if (stepgen->state > stepgen->cycle_max) {
+	stepgen->state = 0;
     }
+}
+
+static void 
+check_hold_delay_step(stepgen_t * const stepgen)
+{
+    /* dir_hold_dly must be non-zero step types 0 and 1 */
+    if ( (stepgen->dir_hold_dly + stepgen->dir_setup) == 0 ) {
+	stepgen->dir_hold_dly = 1;
+    }
+}
+
+static void 
+check_hold_delay_pattern(stepgen_t * const stepgen)
+{
+    /* Nothing to do. */
 }
 
 static bool
@@ -772,11 +800,11 @@ stepgen_make_pulses(stepgen_t * const stepgen)
     update_direction(stepgen);
     if (update_accumulator(stepgen)) {
 	update_timers(stepgen);
-	update_state(stepgen);
+	stepgen->methods->update_state(stepgen);
     }
 
     /* generate output, based on stepping type */
-    stepgen->generate_output(stepgen);
+    stepgen->methods->generate_output(stepgen);
 }
 
 /** The frequency generator works by adding a signed value proportional
@@ -1053,12 +1081,7 @@ static void update_freq(void *arg, long period)
 	    stepgen->dir_setup = stepgen->old_dir_setup;
 	}
 	if ( stepgen->dir_hold_dly != stepgen->old_dir_hold_dly ) {
-	    if ( (stepgen->dir_hold_dly + stepgen->dir_setup) == 0 ) {
-		/* dirdelay must be non-zero step types 0 and 1 */
-		if (stepgen->step_type < first_pattern_step_type) {
-		    stepgen->dir_hold_dly = 1;
-		}
-	    }
+	    stepgen->methods->check_dir_hold_delay(stepgen);
 	    stepgen->old_dir_hold_dly = ulceil(stepgen->dir_hold_dly, periodns);
 	    stepgen->dir_hold_dly = stepgen->old_dir_hold_dly;
 	}
@@ -1134,6 +1157,25 @@ static void update_freq(void *arg, long period)
     }
 }
 
+static stepgen_methods_t const methods[] =
+{
+    [step_type_step_dir] = {
+	.generate_output = output_generate_step_dir,
+	.update_state = update_state_null,
+	.check_dir_hold_delay = check_hold_delay_step
+    },
+    [step_type_up_down] = {
+	.generate_output = output_generate_up_down,
+	.update_state = update_state_null,
+	.check_dir_hold_delay = check_hold_delay_step
+    },
+    [step_type_first_pattern] = {
+	.generate_output = output_generate_pattern,
+	.update_state = update_state_pattern,
+	.check_dir_hold_delay = check_hold_delay_pattern
+    }
+};
+
 /***********************************************************************
 *                   LOCAL FUNCTION DEFINITIONS                         *
 ************************************************************************/
@@ -1194,7 +1236,7 @@ static int export_stepgen(int num, stepgen_t * addr, int step_type, int pos_mode
     retval = hal_param_u32_newf(HAL_RW, &(addr->step_len), comp_id,
 	"stepgen.%d.steplen", num);
     if (retval != 0) { return retval; }
-    if (step_type < first_pattern_step_type) {
+    if (step_type < step_type_first_pattern) {
 	/* step/dir and up/down use 'stepspace' */
 	retval = hal_param_u32_newf(HAL_RW, &(addr->step_space),
 	    comp_id, "stepgen.%d.stepspace", num);
@@ -1237,7 +1279,7 @@ static int export_stepgen(int num, stepgen_t * addr, int step_type, int pos_mode
 	*(addr->phase[DOWN_PIN]) = 0;
     } else {
 	/* stepping types 2 and higher use a varying number of phase pins */
-	addr->num_phases = num_phases_lut[step_type - first_pattern_step_type];
+	addr->num_phases = num_phases_lut[step_type - step_type_first_pattern];
 	for (n = 0; n < addr->num_phases; n++) {
 	    retval = hal_pin_bit_newf(HAL_OUT, &(addr->phase[n]),
 		comp_id, "stepgen.%d.phase-%c", num, n + 'A');
@@ -1252,20 +1294,20 @@ static int export_stepgen(int num, stepgen_t * addr, int step_type, int pos_mode
     addr->freq = 0.0;
     addr->maxvel = 0.0;
     addr->maxaccel = 0.0;
+
     addr->step_type = step_type;
     if (addr->step_type == step_type_step_dir) {
-	addr->generate_output = output_generate_step_dir;
+	addr->methods = &methods[step_type_step_dir];
     } else if (addr->step_type == step_type_up_down) {
-	addr->generate_output = output_generate_up_down;
+	addr->methods = &methods[step_type_up_down];
     } else {
-	addr->generate_output = output_generate_pattern;
+	addr->methods = &methods[step_type_first_pattern];
     }
-
 
     addr->mode = (pos_mode != 0) ? STEPGEN_MODE_POSITION : STEPGEN_MODE_VELOCITY;
     /* timing parameter defaults depend on step type */
     addr->step_len = 1;
-    if (step_type < first_pattern_step_type) {
+    if (step_type < step_type_first_pattern) {
 	addr->step_space = 1;
     } else {
 	addr->step_space = 0;
@@ -1282,9 +1324,9 @@ static int export_stepgen(int num, stepgen_t * addr, int step_type, int pos_mode
     addr->old_dir_hold_dly = ~0;
     addr->old_dir_setup = ~0;
 
-    if (step_type >= first_pattern_step_type) {
+    if (step_type >= step_type_first_pattern) {
 	/* init output stuff */
-	unsigned const user_lut = step_type - first_pattern_step_type;
+	unsigned const user_lut = step_type - step_type_first_pattern;
 
 	addr->cycle_max = cycle_len_lut[user_lut] - 1;
 	addr->lut = master_lut[user_lut];
@@ -1329,7 +1371,7 @@ static int setup_user_step_type(void) {
     }
     cycle_len_lut[USER_STEP_TYPE] = i;
 
-#define BIT(x) (1 << (x))
+#define BIT(x) (1 <<(x))
 #define PHASE_BIT(x) BIT((x) - 1)
 #define MAX_PHASES_ALLOWED 5
 #define ALLOWED_PHASES_BITMASK (BIT(MAX_PHASES_ALLOWED) - 1)
