@@ -74,8 +74,8 @@ MODULE_LICENSE("GPL");
 #include <time.h>
 #endif
 
-char *hal_shmem_base = 0;
-hal_data_t *hal_data = 0;
+char *hal_shmem_base = NULL;
+hal_data_t *hal_data = NULL;
 static int lib_module_id = -1;	/* RTAPI module ID for library module */
 static int lib_mem_id = 0;	/* RTAPI shmem ID for library module */
 
@@ -670,35 +670,35 @@ int hal_pin_new(const char *name, hal_type_t type, hal_pin_dir_t dir,
 
     rtapi_print_msg(RTAPI_MSG_DBG, "HAL: creating pin '%s'\n", name);
     /* get mutex before accessing shared data */
-    rtapi_mutex_get(&(hal_data->mutex));
+    rtapi_mutex_get(&hal_data->mutex);
     /* validate comp_id */
     comp = halpr_find_comp_by_id(comp_id);
-    if (comp == 0) {
+    if (comp == NULL) {
 	/* bad comp_id */
-	rtapi_mutex_give(&(hal_data->mutex));
+	rtapi_mutex_give(&hal_data->mutex);
 	rtapi_print_msg(RTAPI_MSG_ERR,
 	    "HAL: ERROR: component %d not found\n", comp_id);
 	return -EINVAL;
     }
     /* validate passed in pointer - must point to HAL shmem */
-    if (! SHMCHK(data_ptr_addr)) {
+    if (!SHMCHK(data_ptr_addr)) {
 	/* bad pointer */
-	rtapi_mutex_give(&(hal_data->mutex));
+	rtapi_mutex_give(&hal_data->mutex);
 	rtapi_print_msg(RTAPI_MSG_ERR,
 	    "HAL: ERROR: data_ptr_addr not in shared memory\n");
 	return -EINVAL;
     }
     if(comp->ready) {
-	rtapi_mutex_give(&(hal_data->mutex));
+	rtapi_mutex_give(&hal_data->mutex);
 	rtapi_print_msg(RTAPI_MSG_ERR,
 	    "HAL: ERROR: pin_new called after hal_ready\n");
 	return -EINVAL;
     }
     /* allocate a new variable structure */
     new = alloc_pin_struct();
-    if (new == 0) {
+    if (new == NULL) {
 	/* alloc failed */
-	rtapi_mutex_give(&(hal_data->mutex));
+	rtapi_mutex_give(&hal_data->mutex);
 	rtapi_print_msg(RTAPI_MSG_ERR,
 	    "HAL: ERROR: insufficient memory for pin '%s'\n", name);
 	return -ENOMEM;
@@ -709,19 +709,19 @@ int hal_pin_new(const char *name, hal_type_t type, hal_pin_dir_t dir,
     new->type = type;
     new->dir = dir;
     new->signal = 0;
-    memset(&new->dummysig, 0, sizeof(hal_data_u));
+    memset(&new->dummysig, 0, sizeof(new->dummysig));
     rtapi_snprintf(new->name, sizeof(new->name), "%s", name);
     /* make 'data_ptr' point to dummy signal */
-    *data_ptr_addr = comp->shmem_base + SHMOFF(&(new->dummysig));
+    *data_ptr_addr = comp->shmem_base + SHMOFF(&new->dummysig);
     /* search list for 'name' and insert new structure */
-    prev = &(hal_data->pin_list_ptr);
+    prev = &hal_data->pin_list_ptr;
     next = *prev;
     while (1) {
 	if (next == 0) {
 	    /* reached end of list, insert here */
-	    new->next_ptr = next;
+	    new->next_ptr = 0;
 	    *prev = SHMOFF(new);
-	    rtapi_mutex_give(&(hal_data->mutex));
+	    rtapi_mutex_give(&hal_data->mutex);
 	    return 0;
 	}
 	ptr = SHMPTR(next);
@@ -730,19 +730,19 @@ int hal_pin_new(const char *name, hal_type_t type, hal_pin_dir_t dir,
 	    /* found the right place for it, insert here */
 	    new->next_ptr = next;
 	    *prev = SHMOFF(new);
-	    rtapi_mutex_give(&(hal_data->mutex));
+	    rtapi_mutex_give(&hal_data->mutex);
 	    return 0;
 	}
 	if (cmp == 0) {
 	    /* name already in list, can't insert */
 	    free_pin_struct(new);
-	    rtapi_mutex_give(&(hal_data->mutex));
+	    rtapi_mutex_give(&hal_data->mutex);
 	    rtapi_print_msg(RTAPI_MSG_ERR,
 		"HAL: ERROR: duplicate variable '%s'\n", name);
 	    return -EINVAL;
 	}
 	/* didn't find it yet, look at next one */
-	prev = &(ptr->next_ptr);
+	prev = &ptr->next_ptr;
 	next = *prev;
     }
 }
@@ -754,7 +754,7 @@ int hal_pin_alias(const char *pin_name, const char *alias)
     hal_pin_t *pin, *ptr;
     hal_oldname_t *oldname;
 
-    if (hal_data == 0) {
+    if (hal_data == NULL) {
 	rtapi_print_msg(RTAPI_MSG_ERR,
 	    "HAL: ERROR: pin_alias called before init\n");
 	return -EINVAL;
@@ -773,10 +773,10 @@ int hal_pin_alias(const char *pin_name, const char *alias)
     }
     /* get mutex before accessing shared data */
     rtapi_mutex_get(&(hal_data->mutex));
-    if (alias != NULL ) {
+    if (alias != NULL) {
 	pin = halpr_find_pin_by_name(alias);
-	if ( pin != NULL ) {
-	    rtapi_mutex_give(&(hal_data->mutex));
+	if (pin != NULL) {
+	    rtapi_mutex_give(&hal_data->mutex);
 	    rtapi_print_msg(RTAPI_MSG_ERR,
 	        "HAL: ERROR: duplicate pin/alias name '%s'\n", alias);
 	    return -EINVAL;
@@ -789,15 +789,15 @@ int hal_pin_alias(const char *pin_name, const char *alias)
        if we actually need the struct later, the next alloc is guaranteed
        to succeed since at least one struct is on the free list. */
     oldname = halpr_alloc_oldname_struct();
-    if ( oldname == NULL ) {
-	rtapi_mutex_give(&(hal_data->mutex));
+    if (oldname == NULL) {
+	rtapi_mutex_give(&hal_data->mutex);
 	rtapi_print_msg(RTAPI_MSG_ERR,
 	    "HAL: ERROR: insufficient memory for pin_alias\n");
 	return -EINVAL;
     }
     free_oldname_struct(oldname);
     /* find the pin and unlink it from pin list */
-    prev = &(hal_data->pin_list_ptr);
+    prev = &hal_data->pin_list_ptr;
     next = *prev;
     while (1) {
 	if (next == 0) {
@@ -808,12 +808,12 @@ int hal_pin_alias(const char *pin_name, const char *alias)
 	    return -EINVAL;
 	}
 	pin = SHMPTR(next);
-	if ( strcmp(pin->name, pin_name) == 0 ) {
+	if (strcmp(pin->name, pin_name) == 0) {
 	    /* found it, unlink from list */
 	    *prev = pin->next_ptr;
 	    break;
 	}
-	if (pin->oldname != 0 ) {
+	if (pin->oldname != 0) {
 	    oldname = SHMPTR(pin->oldname);
 	    if (strcmp(oldname->name, pin_name) == 0) {
 		/* found it, unlink from list */
@@ -822,12 +822,12 @@ int hal_pin_alias(const char *pin_name, const char *alias)
 	    }
 	}
 	/* didn't find it yet, look at next one */
-	prev = &(pin->next_ptr);
+	prev = &pin->next_ptr;
 	next = *prev;
     }
-    if ( alias != NULL ) {
+    if (alias != NULL) {
 	/* adding a new alias */
-	if ( pin->oldname == 0 ) {
+	if (pin->oldname == 0) {
 	    /* save old name (only if not already saved) */
 	    oldname = halpr_alloc_oldname_struct();
 	    pin->oldname = SHMOFF(oldname);
@@ -846,7 +846,7 @@ int hal_pin_alias(const char *pin_name, const char *alias)
 	}
     }
     /* insert pin back into list in proper place */
-    prev = &(hal_data->pin_list_ptr);
+    prev = &hal_data->pin_list_ptr;
     next = *prev;
     while (1) {
 	if (next == 0) {
