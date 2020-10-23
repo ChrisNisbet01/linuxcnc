@@ -2820,51 +2820,67 @@ void rtapi_app_exit(void)
 	"HAL_LIB: kernel lib removed successfully\n");
 }
 
+static void
+execute_function_list(
+    hal_funct_entry_t * const start, 
+    hal_funct_entry_t * const end,
+    long const period)
+{
+    hal_funct_entry_t * funct_entry = start;
+    long long funct_start_time = rtapi_get_clocks();
+
+    for (funct_entry = start; 
+	  funct_entry != end; 
+	  funct_entry = SHMPTR(funct_entry->links.next)) {
+
+	/* call the function */
+	funct_entry->funct(funct_entry->arg, period);
+	/* capture execution time */
+	long long const funct_end_time = rtapi_get_clocks();
+	/* point to function structure */
+	hal_funct_t * const funct = SHMPTR(funct_entry->funct_ptr);
+
+	/* update execution time data */
+	*(funct->runtime) = funct_end_time - funct_start_time;
+	if (*funct->runtime > funct->maxtime) {
+	    funct->maxtime = *funct->runtime;
+	    funct->maxtime_increased = 1;
+	} else {
+	    funct->maxtime_increased = 0;
+	}
+
+	/* prepare to measure time for next funct */
+	funct_start_time = funct_end_time;
+    }
+}
+
 /* this is the task function that implements threads in realtime */
 
 static void thread_task(void *arg)
 {
     hal_thread_t *thread;
-    hal_funct_t *funct;
-    hal_funct_entry_t *funct_root, *funct_entry;
-    long long int start_time, end_time;
-    long long int thread_start_time;
+    hal_funct_entry_t *funct_root; 
+    hal_funct_entry_t *funct_entry;
 
     thread = arg;
     while (1) {
 	if (hal_data->threads_running > 0) {
 	    /* point at first function on function list */
-	    funct_root = (hal_funct_entry_t *) & (thread->funct_list);
+	    funct_root = (hal_funct_entry_t *)&(thread->funct_list);
 	    funct_entry = SHMPTR(funct_root->links.next);
+
 	    /* execution time logging */
-	    start_time = rtapi_get_clocks();
-	    end_time = start_time;
-	    thread_start_time = start_time;
+	    long long const start_time = rtapi_get_clocks();
+
 	    /* run thru function list */
-	    while (funct_entry != funct_root) {
-		/* call the function */
-		funct_entry->funct(funct_entry->arg, thread->period);
-		/* capture execution time */
-		end_time = rtapi_get_clocks();
-		/* point to function structure */
-		funct = SHMPTR(funct_entry->funct_ptr);
-		/* update execution time data */
-		*(funct->runtime) = (hal_s32_t)(end_time - start_time);
-		if ( *(funct->runtime) > funct->maxtime) {
-		    funct->maxtime = *(funct->runtime);
-		    funct->maxtime_increased = 1;
-		} else {
-		    funct->maxtime_increased = 0;
-		}
-		/* point to next next entry in list */
-		funct_entry = SHMPTR(funct_entry->links.next);
-		/* prepare to measure time for next funct */
-		start_time = end_time;
-	    }
+	    execute_function_list(funct_entry, funct_root, thread->period);
+
 	    /* update thread execution time */
-	    *(thread->runtime) = (hal_s32_t)(end_time - thread_start_time);
-	    if ( *(thread->runtime) > thread->maxtime) {
-	        thread->maxtime = *(thread->runtime);
+	    long long const end_time = rtapi_get_clocks();
+
+	    *(thread->runtime) = (hal_s32_t)(end_time - start_time);
+	    if (*(thread->runtime) > thread->maxtime) {
+		thread->maxtime = *(thread->runtime);
 	    }
 	}
 	/* wait until next period */
