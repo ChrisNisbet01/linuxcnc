@@ -390,74 +390,64 @@ static void reset_port(void *arg, long period) {
 
 static void write_port(void *arg, long period)
 {
-    parport_t *port;
-    int b;
-    unsigned char outdata, mask;
+    parport_t * const port = arg;
+    uint_fast8_t ctrl_outdata;
 
-    port = arg;
     /* are we using the data port for output? */
     if (port->data_dir == 0) {
-	int reset_mask=0, reset_val=0;
 	/* yes */
-	outdata = 0x00;
-	mask = 0x01;
+	uint_fast8_t outdata = 0;
+	uint_fast8_t reset_mask = 0; 
+	uint_fast8_t reset_val = 0;
+	size_t b;
+
 	/* assemble output byte for data port from 8 source variables */
 	for (b = 0; b < 8; b++) {
-	    /* get the data, add to output byte */
-	    if ((*(port->data_out[b])) && (!port->data_inv[b])) {
-		outdata |= mask;
-	    }
-	    if ((!*(port->data_out[b])) && (port->data_inv[b])) {
-		outdata |= mask;
-	    }
-	    if (port->data_reset[b]) {
-		reset_mask |= mask;
-		if(port->data_inv[b]) reset_val |= mask;
-	    }
-	    mask <<= 1;
+	    uint8_t const val = 
+		(!(*port->data_out[b]) ^ !(port->data_inv[b])) << b;
+	    outdata |= val;
 	}
+
 	/* write it to the hardware */
 	rtapi_outb(outdata, port->base_addr);
+
 	port->write_time = rtapi_get_clocks();
 	port->reset_val = reset_val;
 	port->reset_mask = reset_mask;
 	port->outdata = outdata;
+
 	/* prepare to build control port byte, with direction bit clear */
-	outdata = 0x00;
+	ctrl_outdata = 0;
     } else {
 	/* prepare to build control port byte, with direction bit set */
-	outdata = 0x20;
+	ctrl_outdata = 0x20;
     }
+
     /* are we using the control port for input? */
     if (port->use_control_in) {
 	/* yes, force those pins high */
-	outdata |= 0x0F;
+	ctrl_outdata |= 0x0F;
     } else {
-	int reset_mask=0, reset_val=0;
+	uint_fast8_t reset_mask = 0;
+	uint_fast8_t reset_val = 0;
+	size_t b;
 	/* no, assemble output byte from 4 source variables */
-	mask = 0x01;
 	for (b = 0; b < 4; b++) {
 	    /* get the data, add to output byte */
-	    if ((*(port->control_out[b])) && (!port->control_inv[b])) {
-		outdata |= mask;
-	    }
-	    if ((!*(port->control_out[b])) && (port->control_inv[b])) {
-		outdata |= mask;
-	    }
-	    if (port->control_reset[b]) {
-		reset_mask |= mask;
-		if(port->control_inv[b]) reset_val |= mask;
-	    }
-	    mask <<= 1;
+	    uint8_t const val = 
+		((*port->control_out[b] != 0) ^ (port->control_inv[b] != 0)) << b;
+	    ctrl_outdata |= val;
+	    reset_mask |= (port->control_reset[b] != 0) << b;
+	    reset_val |= ((port->control_reset[b] != 0) & (port->control_inv[b] != 0)) << b;
 	}
         port->reset_mask_ctrl = reset_mask;
         port->reset_val_ctrl = reset_val;
-	port->outdata_ctrl = outdata;
+	port->outdata_ctrl = ctrl_outdata;
     }
     /* correct for hardware inverters on pins 1, 14, & 17 */
-    outdata ^= 0x0B;
+    ctrl_outdata ^= 0x0B;
     /* write it to the hardware */
-    rtapi_outb(outdata, port->base_addr + 2);
+    rtapi_outb(ctrl_outdata, port->base_addr + 2);
     port->write_time_ctrl = rtapi_get_clocks();
 }
 
